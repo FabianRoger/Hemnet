@@ -1,0 +1,428 @@
+---
+title: "Apartments"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(randomForest)
+library(viridis)
+```
+
+
+
+```{r}
+SOLD_raw <- read.table("SOLD.txt")
+
+SOLD_wide <- 
+SOLD_raw %>%
+  na.omit() %>% 
+  unique(.keep.all = T) %>% 
+  spread(Variable, Value) 
+
+
+Months <- as.matrix(data.frame(Swedish =  c("januari","februari","mars",
+                                  "april", "maj", "juni",
+                                  "juli", "augusti", "september",
+                                  "oktober", "november", "december"),
+                     English = c("January","February","March",
+                                 "April","May","June",
+                                 "July","August","September",
+                                 "October","November","December")))
+
+SOLD <- 
+SOLD_wide %>% 
+  mutate(Date = sub(".+?(\\d+\\s\\w+\\s\\d{4}).+","\\1", Meta)) %>% 
+  mutate(Kommun = sub(".+?(\\w+\\skommun)\n.+","\\1", Meta)) %>%
+  mutate(Street = sub(".+kommun\\-(.+?)-\\d.+","\\1", Link)) %>% 
+  mutate(id = 1:n()) %>% 
+  select(-Link, -Meta, -Biarea, -Tomtarea) %>%
+  rename(Rooms = `Antal rum`) %>% 
+  mutate(Rooms = as.numeric(str_extract(Rooms, "\\d+"))) %>% 
+  rename(Charges = `Avgift/månad`) %>% 
+  mutate(Charges = gsub("\\s", "", Charges)) %>% 
+  mutate(Charges = as.numeric(str_extract(Charges, "\\d+"))) %>%
+  rename(Asking_price = `Begärt pris`) %>% 
+  mutate(Asking_price = gsub("\\s", "", Asking_price)) %>% 
+  mutate(Asking_price = as.numeric(str_extract(Asking_price, "\\d+"))) %>%
+  rename(square_meter = `Boarea`) %>% 
+  mutate(square_meter = as.numeric(str_extract(square_meter, "\\d+"))) %>%
+  rename(Constr_Year = `Byggår`) %>% 
+  mutate(Constr_Year = as.numeric(str_extract(Constr_Year, "\\d+"))) %>% 
+  mutate(Driftskostnad = gsub("\\s", "", Driftskostnad)) %>% 
+  mutate(Driftskostnad = as.numeric(str_extract(Driftskostnad, "\\d+"))) %>%
+  rename(price_square_m = `Pris per kvadratmeter`) %>% 
+  mutate(price_square_m = gsub("\\s", "", price_square_m)) %>% 
+  mutate(price_square_m = as.numeric(str_extract(price_square_m, "\\d+"))) %>%
+  rename(price_increase = Prisutveckling) %>% 
+  mutate(price_increase = gsub("\\s", "", price_increase)) %>% 
+  mutate(price_increase = as.numeric(str_extract(price_increase, "\\d+"))) %>%
+  rename(selling_price = Slutpris) %>% 
+  mutate(selling_price = gsub("\\s", "", selling_price)) %>% 
+  mutate(selling_price = as.numeric(str_extract(selling_price, "\\d+"))) %>%
+  mutate(increase_prct = ((selling_price-Asking_price)/Asking_price)*100) %>% 
+  mutate(Date = sub("januari", "January", Date)) %>% 
+  mutate(Date = sub("februari", "February", Date)) %>% 
+  mutate(Date = sub("mars", "March", Date)) %>% 
+#  mutate(Date = sub("april", "April", Date)) %>% 
+  mutate(Date = sub("maj", "May", Date)) %>% 
+  mutate(Date = sub("juni", "June", Date)) %>% 
+  mutate(Date = sub("juli", "July", Date)) %>% 
+  mutate(Date = sub("augusti", "August", Date)) %>% 
+#  mutate(Date = sub("september", "September", Date)) %>% 
+  mutate(Date = sub("oktober", "October", Date)) %>% 
+#  mutate(Date = sub("november", "November", Date)) %>% 
+#  mutate(Date = sub("december", "December", Date)) %>%
+  mutate(Date = dmy(Date)) %>% 
+  rename(Tenant = `Förening`) %>% 
+  mutate(Tenant = gsub("\\\n", "", Tenant)) %>% 
+  mutate(Month = round_date(Date, unit = "month"))
+  
+  
+summary(SOLD)
+ 
+```
+# selling price
+
+```{r}
+SOLD %>% 
+  filter(square_meter > 70, square_meter < 90 ) %>% 
+  #filter(Kommun == "Mölndals kommun") %>% 
+  ggplot(., aes(x = Date, y = selling_price))+
+  geom_point(alpha = 0.1, size = 1, colour = "steelblue3")+
+  geom_smooth(size = 0.2, colour = "darkgreen")+
+  geom_violin(aes(group = Month), fill = NA, draw_quantiles=c(0.1,0.5,0.9))+
+  scale_x_date(date_breaks = "1 months",
+               date_labels = "%b %y")+
+ # scale_y_continuous(limits = c(NA, 1e7))+
+  theme(axis.text.x = element_text(angle = -30, hjust = 0))
+  
+
+```
+
+
+```{r}
+SOLD %>% 
+  filter(square_meter > 60, square_meter < 140 ) %>% 
+ # filter(Kommun == "Mölndals kommun") %>% 
+  ggplot(., aes(x = Date, y = increase_prct))+
+  geom_point(alpha = 0.5, size = 1, colour = "steelblue3")+
+  geom_smooth(size = 0.2, colour = "darkgreen")+
+  geom_violin(aes(group = Month), fill = NA, draw_quantiles=c(0.1,0.5,0.9))+
+  scale_x_date(date_breaks = "1 months",
+               date_labels = "%b %y")+
+  scale_y_continuous(limits = c(-50,50))+
+  theme(axis.text.x = element_text(angle = -30, hjust = 0))
+  
+
+```
+
+```{r}
+SOLD %>% 
+  filter(square_meter > 60, square_meter < 140 ) %>% 
+  filter(Kommun == "Mölndals kommun") %>% 
+  ggplot(., aes(x = Asking_price, y = selling_price))+
+  geom_point(alpha = 0.1, size = 1, colour = "steelblue3")+
+  geom_smooth(size = 0.2, aes(colour = as.factor(Month)), se = F, method = "lm")+
+ # geom_violin(aes(group = Month), fill = NA, draw_quantiles=c(0.1,0.5,0.9))+
+  #scale_y_continuous(limits = c(-50,50))+
+  theme(axis.text.x = element_text(angle = -30, hjust = 0))
+  
+```
+
+
+```{r}
+SOLD_filt <- 
+  SOLD %>% 
+  filter(Constr_Year > 1900, Constr_Year < 2018) %>% 
+  filter(Driftskostnad > 1900, Constr_Year < 2018) %>% 
+  filter(Asking_price > 10^4, Asking_price < 10^7) %>% 
+  filter(selling_price > 10^4, selling_price < 10^7) %>% 
+  filter(square_meter > 20, square_meter < 180) %>% 
+  group_by(Kommun) %>% 
+  filter(n() > 200) 
+
+SOLD_mod <- SOLD_filt %>% 
+  select(Rooms, Charges, square_meter, Constr_Year, Driftskostnad, Date, Kommun, selling_price, )
+```
+
+
+```{r}
+SOLD_fit <- SOLD_mod %>% 
+  sample_frac(0.7) %>% 
+  ungroup %>% 
+  na.omit() %>% 
+  mutate(Kommun = as.factor(Kommun))
+
+
+SOLD_rf <- randomForest(selling_price ~ ., data = SOLD_fit, importance=TRUE, proximity =TRUE)
+
+importance(SOLD_rf)
+varImpPlot(SOLD_rf)
+
+PRED <- predict(SOLD_rf, SOLD_fit) %>% 
+  data.frame(Pred = .)
+
+PRED %>% cbind(., SOLD_fit) %>% 
+  ggplot(aes(x = selling_price, y = Pred))+
+  geom_point(alpha = 0.1)+
+  geom_abline(slope = 1, intercept = c(0,0))
+
+
+Mölndal <- SOLD_filt %>% 
+  filter(Kommun == "Mölndals kommun") %>% 
+  ungroup %>% 
+  mutate(Kommun = factor(Kommun, levels = levels(SOLD_fit$Kommun)))
+ 
+
+Pred_Mölndal <- predict(SOLD_rf, Mölndal)
+
+Pred_Mölndal %>% 
+  data.frame(Pred = .) %>% 
+  cbind(., Mölndal) %>% 
+  ggplot(aes(x = selling_price, y = Pred))+
+  geom_point(alpha = 0.6)+
+  geom_abline(slope = 1, intercept = c(0,0))
+  
+
+```
+
+
+# Mölndal all
+
+
+
+```{r}
+SOLD_M_raw <- read.table("SOLD_Mölndal.txt")
+
+SOLD_M_wide <- 
+SOLD_M_raw %>%
+  na.omit() %>% 
+  unique(.keep.all = T) %>% 
+  spread(Variable, Value) 
+
+Broker_extr_P <- function(x) {B <- unlist(str_split(x, "\\\n"))[6]
+return(B)}
+
+Broker_extr_C <- function(x) {B <- unlist(str_split(x, "\\\n"))[11]
+return(B)}
+
+
+SOLD_M <- 
+SOLD_M_wide %>% 
+  mutate(Date = sub(".+?(\\d+\\s\\w+\\s\\d{4}).+","\\1", Meta)) %>% 
+  mutate(Kommun = sub(".+?(\\w+\\skommun)\n.+","\\1", Meta)) %>%
+  mutate(Street = sub(".+kommun\\-(.+?)-\\d.+","\\1", Link)) %>% 
+  rowwise() %>% 
+  mutate(Broker_P = Broker_extr_P(Broker)) %>%
+  mutate(Broker_C = Broker_extr_C(Broker)) %>%
+  ungroup() %>% 
+  mutate(id = 1:n()) %>% 
+  select(-Link, -Meta, -Biarea, -Broker) %>%
+  rename(Rooms = `Antal rum`) %>% 
+  mutate(Rooms = as.numeric(str_extract(Rooms, "\\d+"))) %>% 
+  rename(Charges = `Avgift/månad`) %>% 
+  mutate(Charges = gsub("\\s", "", Charges)) %>% 
+  mutate(Charges = as.numeric(str_extract(Charges, "\\d+"))) %>%
+  rename(Asking_price = `Begärt pris`) %>% 
+  mutate(Asking_price = gsub("\\s", "", Asking_price)) %>% 
+  mutate(Asking_price = as.numeric(str_extract(Asking_price, "\\d+"))) %>%
+  rename(square_meter = `Boarea`) %>% 
+  mutate(square_meter = as.numeric(str_extract(square_meter, "\\d+"))) %>%
+  rename(Constr_Year = `Byggår`) %>% 
+  mutate(Constr_Year = as.numeric(str_extract(Constr_Year, "\\d+"))) %>% 
+  mutate(Driftskostnad = gsub("\\s", "", Driftskostnad)) %>% 
+  mutate(Driftskostnad = as.numeric(str_extract(Driftskostnad, "\\d+"))) %>%
+  rename(price_square_m = `Pris per kvadratmeter`) %>% 
+  mutate(price_square_m = gsub("\\s", "", price_square_m)) %>% 
+  mutate(price_square_m = as.numeric(str_extract(price_square_m, "\\d+"))) %>%
+  rename(price_increase = Prisutveckling) %>% 
+  mutate(price_increase = gsub("\\s", "", price_increase)) %>% 
+  mutate(price_increase = as.numeric(str_extract(price_increase, "\\d+"))) %>%
+  rename(selling_price = Slutpris) %>% 
+  mutate(selling_price = gsub("\\s", "", selling_price)) %>% 
+  mutate(selling_price = as.numeric(str_extract(selling_price, "\\d+"))) %>%
+  mutate(increase_prct = ((selling_price-Asking_price)/Asking_price)*100) %>% 
+  mutate(Date = sub("januari", "January", Date)) %>% 
+  mutate(Date = sub("februari", "February", Date)) %>% 
+  mutate(Date = sub("mars", "March", Date)) %>% 
+#  mutate(Date = sub("april", "April", Date)) %>% 
+  mutate(Date = sub("maj", "May", Date)) %>% 
+  mutate(Date = sub("juni", "June", Date)) %>% 
+  mutate(Date = sub("juli", "July", Date)) %>% 
+  mutate(Date = sub("augusti", "August", Date)) %>% 
+#  mutate(Date = sub("september", "September", Date)) %>% 
+  mutate(Date = sub("oktober", "October", Date)) %>% 
+#  mutate(Date = sub("november", "November", Date)) %>% 
+#  mutate(Date = sub("december", "December", Date)) %>%
+  mutate(Date = dmy(Date)) %>% 
+  rename(Tenant = `Förening`) %>% 
+  mutate(Tenant = gsub("\\\n", "", Tenant)) %>% 
+  mutate(Month = round_date(Date, unit = "month"))
+  
+
+SOLD_M %>% 
+  filter(grepl("Marcus Davidsson", Broker_P))
+ 
+```
+
+# selling price
+
+```{r}
+
+Bifrost <- c("vete", "havre", "utsädes", "blandsädes", "pinnharvs", "rullharvs", "släpharvs")
+
+paste(Bifrost, collapse = "|")
+
+SOLD_M %>% 
+  #filter(square_meter > 70, square_meter < 90) %>% 
+  filter(Rooms == 3) %>% 
+  ggplot(., aes(x = Date, y = selling_price))+
+  geom_point(alpha = 0.6, size = 3, alpha = 0.4, shape = 21)+
+  geom_point(data =  filter(SOLD_M, square_meter > 70, square_meter < 90,
+                            grepl(paste(Bifrost, collapse = "|"), Street)),
+             aes(x = Date, y = selling_price, fill = Street), shape = 21, size = 3)+
+  geom_smooth(size = 1, colour = "darkgreen")+
+  #geom_violin(aes(group = Month), fill = NA, draw_quantiles=c(0.1,0.5,0.9))+
+  scale_x_date(date_breaks = "3 months",
+               date_labels = "%b %y")+
+  scale_fill_viridis(discrete = T)+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank())+
+  theme(axis.text.x = element_text(angle = -45, hjust = 0))+
+  scale_y_continuous(breaks = seq(1e6, 5e6, 2e5), 
+                     labels = function(x) format(x, scientific = TRUE))
+  
+
+```
+
+```{r}
+
+
+SOLD_M %>% 
+filter(grepl("Mäklarhuset", Broker_C))
+filter(grepl("Lundin", Broker_C))  
+filter(grepl("Bjurfors Mölndal", Broker_C))  
+  filter()
+
+```
+
+
+# Houses in Lund
+
+
+
+```{r}
+SOLD_L_raw <- read.table("SOLD_Lund.txt")
+
+SOLD_L_wide <- 
+SOLD_L_raw %>%
+  na.omit() %>% 
+  unique(.keep.all = T) %>% 
+  spread(Variable, Value) 
+
+Broker_extr_P <- function(x) {B <- unlist(str_split(x, "\\\n"))[6]
+return(B)}
+
+Broker_extr_C <- function(x) {B <- unlist(str_split(x, "\\\n"))[11]
+return(B)}
+
+
+SOLD_L <- 
+SOLD_L_wide %>% 
+  filter(grepl("Veberöd", Meta)) %>% 
+  mutate(Date = sub(".+?(\\d+\\s\\w+\\s\\d{4}).+","\\1", Meta)) %>% 
+  mutate(Kommun = sub(".+?(\\w+\\skommun)\n.+","\\1", Meta)) %>%
+  mutate(Street = sub(".+kommun\\-(.+?)-\\d.+","\\1", Link)) %>%
+  mutate(Typ = ifelse(grepl("Villa", Meta), "Villa",
+                      ifelse(grepl("Radhus", Meta), "Radhus", NA))) %>% 
+  rowwise() %>% 
+  mutate(Broker_P = Broker_extr_P(Broker)) %>%
+  mutate(Broker_C = Broker_extr_C(Broker)) %>%
+  ungroup() %>% 
+  mutate(id = 1:n()) %>% 
+  select(-Link, -Meta, -Broker) %>%
+  rename(Rooms = `Antal rum`) %>% 
+  mutate(Rooms = as.numeric(str_extract(Rooms, "\\d+"))) %>% 
+  #rename(Charges = `Avgift/månad`) %>% 
+  #mutate(Charges = gsub("\\s", "", Charges)) %>% 
+  #mutate(Charges = as.numeric(str_extract(Charges, "\\d+"))) %>%
+  rename(Asking_price = `Begärt pris`) %>% 
+  mutate(Asking_price = gsub("\\s", "", Asking_price)) %>% 
+  mutate(Asking_price = as.numeric(str_extract(Asking_price, "\\d+"))) %>%
+  rename(square_meter = `Boarea`) %>% 
+  mutate(square_meter = as.numeric(str_extract(square_meter, "\\d+"))) %>%
+  rename(Constr_Year = `Byggår`) %>% 
+  mutate(Constr_Year = as.numeric(str_extract(Constr_Year, "\\d+"))) %>% 
+  mutate(Driftskostnad = gsub("\\s", "", Driftskostnad)) %>% 
+  mutate(Driftskostnad = as.numeric(str_extract(Driftskostnad, "\\d+"))) %>%
+  rename(price_square_m = `Pris per kvadratmeter`) %>% 
+  mutate(price_square_m = gsub("\\s", "", price_square_m)) %>% 
+  mutate(price_square_m = as.numeric(str_extract(price_square_m, "\\d+"))) %>%
+  rename(price_increase = Prisutveckling) %>% 
+  mutate(price_increase = gsub("\\s", "", price_increase)) %>% 
+  mutate(price_increase = as.numeric(str_extract(price_increase, "\\d+"))) %>%
+  rename(selling_price = Slutpris) %>% 
+  mutate(selling_price = gsub("\\s", "", selling_price)) %>% 
+  mutate(selling_price = as.numeric(str_extract(selling_price, "\\d+"))) %>%
+  mutate(increase_prct = ((selling_price-Asking_price)/Asking_price)*100) %>% 
+  mutate(Date = sub("januari", "January", Date)) %>% 
+  mutate(Date = sub("februari", "February", Date)) %>% 
+  mutate(Date = sub("mars", "March", Date)) %>% 
+#  mutate(Date = sub("april", "April", Date)) %>% 
+  mutate(Date = sub("maj", "May", Date)) %>% 
+  mutate(Date = sub("juni", "June", Date)) %>% 
+  mutate(Date = sub("juli", "July", Date)) %>% 
+  mutate(Date = sub("augusti", "August", Date)) %>% 
+#  mutate(Date = sub("september", "September", Date)) %>% 
+  mutate(Date = sub("oktober", "October", Date)) %>% 
+#  mutate(Date = sub("november", "November", Date)) %>% 
+#  mutate(Date = sub("december", "December", Date)) %>%
+  mutate(Date = dmy(Date)) %>% 
+  rename(Tenant = `Förening`) %>% 
+  mutate(Tenant = gsub("\\\n", "", Tenant)) %>% 
+  mutate(Month = round_date(Date, unit = "month"))
+  
+ 
+```
+
+
+```{r}
+
+SOLD_L %>% 
+ # filter(!grepl("\\\n", Kommun)) %>% 
+  #filter(square_meter > 100, square_meter < 300) %>% 
+  #filter(selling_price < 5e6) %>% 
+  #filter(Typ == "Villa") %>% 
+  select(Asking_price, selling_price, increase_prct, square_meter, Tomtarea, Date, Kommun, Typ) %>% 
+  na.omit() %>% 
+ # arrange(Date)
+  ggplot(aes(x=Date, y= selling_price, colour = Typ))+
+  geom_point(alpha = 0.3, colour = "darkgrey")+
+  geom_smooth()+
+  #facet_wrap(~Kommun)+
+  theme_bw()+
+  scale_color_brewer(palette = "Set1")
+
+```
+
+```{r}
+SOLD_L %>% 
+  filter(!grepl("\\\n", Kommun)) %>% 
+  filter(square_meter > 100, square_meter < 300) %>% 
+  filter(selling_price < 5e6) %>% 
+  filter(Date > "2016-01-01") %>% 
+  select(Date, selling_price, Kommun, Typ) %>% 
+  na.omit() %>% 
+  ggplot(aes(x=Kommun, y= selling_price, colour = Typ))+
+  geom_point(alpha = 0.3, position = position_jitterdodge())+
+  geom_violin(draw_quantiles = c(0.1,0.5,0.9), fill = NA, colour = "black",
+              aes(group = paste(Typ, Kommun)))+
+  theme_bw()+
+  scale_color_brewer(palette = "Set1")+
+  theme(axis.text.x = element_text(angle = -45, hjust = 0))
+```
+
