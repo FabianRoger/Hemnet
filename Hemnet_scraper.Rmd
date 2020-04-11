@@ -1,0 +1,210 @@
+---
+title: "Hemnet_scraper"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(rvest)
+library(parallel)
+```
+
+
+get all links to sold appartments on Hemnet for all of Sweden in the last 12 month
+
+(expected to run ca 10 min)
+```{r}
+
+Pages <- paste("https://www.hemnet.se/salda/bostader?item_types%5B%5D=bostadsratt&page=", c(1:1433), sep = "")
+
+Link_extract <- function(x) {
+  read_html(x) %>% 
+    html_nodes(".item-link-container") %>% 
+    html_attr(name = "href")
+}
+
+cl <- makeCluster(mc <- getOption("cl.cores", 4))
+clusterEvalQ(cl, {library(tidyverse); library(rvest)})
+
+Links <- parLapply(cl, Pages, Link_extract)
+
+Links <- unlist(Links)
+
+write(Links, "links.txt")
+
+```
+
+
+get the info for each appartment 
+
+expected run-time: 3.6 hours
+```{r}
+
+Get_values <- function(x){
+  
+  RES <- read_html(x) %>% 
+    html_nodes(".sold-property__price-value,
+               .sold-property__price-label,
+               .sold-property__attribute-value,
+               .sold-property__attribute,
+               .sold-property__metadata") %>% 
+    html_text()
+  
+  DF <- data.frame(Variable = RES[seq(2,21,2)],
+                   Value = RES[seq(3,21,2)],
+                   Meta = RES[1],
+                   Link = x,
+                   stringsAsFactors = FALSE)
+  
+  return(DF)}
+  
+#cl <- makeCluster(mc <- getOption("cl.cores", 4))
+
+
+SOLD_list <- parLapply(cl, Links, Get_values)
+
+
+SOLD <- bind_rows(SOLD_list)
+
+write.table(SOLD, "SOLD.txt")
+
+
+head(SOLD)
+```
+
+# for Mölndal only
+
+```{r}
+
+
+Pages <- paste("https://www.hemnet.se/salda/bostader?item_types%5B%5D=bostadsratt&location_ids%5B%5D=17997&page=", c(1:55), "&sold_age=all", sep = "")
+
+Link_extract <- function(x) {
+  read_html(x) %>% 
+    html_nodes(".item-link-container") %>% 
+    html_attr(name = "href")
+}
+
+cl <- makeCluster(mc <- getOption("cl.cores", 4))
+clusterEvalQ(cl, {library(tidyverse); library(rvest)})
+
+Links <- parLapply(cl, Pages, Link_extract)
+
+Links <- unlist(Links)
+
+write(Links, "links_mölndal.txt")
+
+
+```
+
+
+```{r}
+
+Get_values <- function(x){
+  
+  RES <- read_html(x) %>% 
+    html_nodes(".sold-property__price-value,
+               .sold-property__price-label,
+               .sold-property__attribute-value,
+               .sold-property__attribute,
+               .sold-property__metadata,
+               .broker-info--sold") %>% 
+    html_text()
+  
+  DF <- data.frame(Variable = RES[seq(2,21,2)],
+                   Value = RES[seq(3,21,2)],
+                   Meta = RES[1],
+                   Link = x,
+                   Broker = RES[22],
+                   stringsAsFactors = FALSE)
+  
+  return(DF)}
+  
+#cl <- makeCluster(mc <- getOption("cl.cores", 4))
+
+
+SOLD_list <- parLapply(cl, Links, Get_values)
+
+stopCluster(cl)
+
+SOLD <- bind_rows(SOLD_list)
+
+write.table(SOLD, "SOLD_Mölndal.txt")
+
+
+head(SOLD)
+```
+
+
+#for Lund only
+
+
+```{r}
+
+Pages <- paste("https://www.hemnet.se/salda/bostader?item_types%5B%5D=villa&item_types%5B%5D=radhus&location_ids%5B%5D=17864&location_ids%5B%5D=17889&location_ids%5B%5D=17974&location_ids%5B%5D=17986&location_ids%5B%5D=17987&location_ids%5B%5D=17989&location_ids%5B%5D=18053&page=", c(1:126), "&sold_age=all", sep = "")
+
+Link_extract <- function(x) {
+  read_html(x) %>% 
+    html_nodes(".item-link-container") %>% 
+    html_attr(name = "href")
+}
+
+cl <- makeCluster(mc <- getOption("cl.cores", 4))
+clusterEvalQ(cl, {library(tidyverse); library(rvest)})
+
+Links <- parLapply(cl, Pages, Link_extract)
+
+Links <- unlist(Links)
+
+write(Links, "links_Lund.txt")
+
+
+```
+
+
+```{r}
+
+Slots <- c("Slutpris","Pris per kvadratmeter","Begärt pris",
+           "Prisutveckling", "Antal rum", "Boarea", "Tomtarea", "Driftskostnad", 
+           "Byggår", "Biarea", "Förening")    
+
+Get_values <- function(x){
+  
+  RES <- read_html(x) %>% 
+    html_nodes(".sold-property__price-value,
+               .sold-property__price-label,
+               .sold-property__attribute-value,
+               .sold-property__attribute,
+               .sold-property__metadata,
+               .broker-info--sold") %>% 
+    html_text()
+
+  Vars <- which(grepl(paste(Slots, collapse = "|"), RES))
+
+  DF <- data.frame(Variable = RES[Vars],
+                   Value = RES[Vars+1],
+                   Meta = RES[1],
+                   Link = x,
+                   Broker = RES[length(RES)],
+                   stringsAsFactors = FALSE)
+  
+  return(DF)}
+  
+#cl <- makeCluster(mc <- getOption("cl.cores", 4))
+
+
+SOLD_list <- lapply(Links, Get_values)
+
+stopCluster(cl)
+
+SOLD <- bind_rows(SOLD_list)
+
+write.table(SOLD, "SOLD_Lund.txt")
+
+head(SOLD)
+```
+
